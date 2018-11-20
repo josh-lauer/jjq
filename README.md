@@ -20,6 +20,8 @@ A multi-subscriber queue with an infinite history.
   - optional for now
 
 ## Hot Store
+Maintains queues and subscribers, manages queue data in memory  and provides an interface to pull
+data out of the queues.
 
 ### public interface
 - create a queue
@@ -28,27 +30,42 @@ A multi-subscriber queue with an infinite history.
 - push
 - pop
 - peek
+- load all elements from a block into the internal database
 
-### database structure
-- subscriber_id -> queue position
+### relational database structure (normalized)
+- subscribers
+  - id
+  - name
+  - queue id
+  - current block name
+  - current block offset
+- queue
+  - id
+  - name
+
+### fast database structure
 - list of all blocks in cold storage
   - list of all blocks in hot storage
   - lists of subscribers in each block, automatically updated when a subscriber moves
+
 - list of queue elements in memory and their associated blocks
   - when the last subscriber leaves a block, the whole block is dropped out of the store
+- queue element
+  - next element
+  - data
 
 ### what happens on a pop
-- look up the queue position for the subscriber
-- check if the block for the queue position is loaded
-- optionally load it
-- return the queue element
-- asynchronously check if the subscriber has left the block
-  - if they were the last one in the block and there is no subscriber that is reaching the end of
-    the immediately previous block, drop the block out of memory
-  - check if one of these processes is already running
-- asynchronously check if the subscriber is reaching the end of their current block
-  - load the next block
-  - check if one of these processes is already running
+- look up the queue position for the subscriber i the relational database
+- check if the record for the queue position is loaded
+- synchronously load it from cold storage if necessary
+- popthe queue element
+- check the length of the queue in memory for the subscriber/topic
+- if the length is too short, run
+  - get the block id for the subscriber/topic out of relational database
+  - query the cold side for the next block id
+  - update the relational database with the new block id and a negative number for the number of
+    things currently in the queue
+  - request that the cold side loads the next block id's data into the in memory store
 - A peek works the same as a pop except the asynchronous steps don't need to be run
 
 ### what happens on a push
@@ -83,21 +100,31 @@ A multi-subscriber queue with an infinite history.
       that are no longer serving them?
 
 ## Cold Store
+Manages long term storage blocks.  It saves them and makes them available.
 
 ### public interface
+- create a new queue
 - create a new block
 - write a block
 - list all blocks
-- read a block
+
+- read the block for a given block id, subscriber, and  queue name and write into in memory db
+- next block id after the given block id
+- previous block id before the given block id
 
 ### how are blocks organized
 - metadata 
   - minimum and maximum queue element in the block
   - checksum on the data
   - path to the data file
+  - next block
+  - previous block
 - data
   - queue element id/timestamp/etc
   - text contents of the element: string, jsonlines, etc
     - version 2 can store complex objects like images or references to other files
 - external settings
   - block size is settable by the thing that writes it
+
+### Creating a block
+- public 
